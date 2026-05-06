@@ -15,6 +15,7 @@ from mintedge import (
     IdealPredictor,
     Infrastructure,
     MobilityManager,
+    QLearningServerActivationPolicy,
 )
 
 
@@ -35,6 +36,7 @@ class Orchestrator:
         "latest_kpis",
         "em_servers",
         "em_links",
+        "activation_policy",
     ]
 
     def __init__(
@@ -58,6 +60,11 @@ class Orchestrator:
         self.demand_mat = self.initialize_demand_matrix()
         self.predictor = IdealPredictor(infr, mob_mngr, env)
         self.alloc_strategy = AllocationStrategy(infr)
+        self.activation_policy = (
+            QLearningServerActivationPolicy.from_settings()
+            if getattr(settings, "USE_RL_SERVER_ACTIVATION", False)
+            else None
+        )
 
         # KPI related
         self.kpis = self._initialize_measurements()
@@ -103,15 +110,30 @@ class Orchestrator:
                 if settings.CAPACITY_BUFFER > 0:
                     new_demand_mat = self._apply_capacity_buffer(new_demand_mat)
 
+                activation_decision = None
+                if self.activation_policy is not None:
+                    activation_decision = self.activation_policy.select_status(
+                        self.infr,
+                        new_demand_mat,
+                        self.latest_kpis,
+                        self.status_vec,
+                    )
+
                 # If the demand is higher than the available resources, reject
-                new_demand_mat = self._get_max_acceptable(new_demand_mat)
+                new_demand_mat = self._get_max_acceptable(
+                    new_demand_mat,
+                    activation_decision.status_vector if activation_decision else None,
+                )
 
                 # New Resource Allocation
                 (
                     status_vec,
                     assig_mat,
                     alloc_mat,
-                ) = self.alloc_strategy.get_allocation(new_demand_mat)
+                ) = self.alloc_strategy.get_allocation(
+                    new_demand_mat,
+                    activation_decision.status_vector if activation_decision else None,
+                )
 
                 # Place resources as computed by the allocation strategy
                 self.allocate(new_demand_mat, status_vec, assig_mat, alloc_mat)
@@ -122,6 +144,8 @@ class Orchestrator:
 
             # Gather and store kpis
             self.save_kpis(int(env.now))
+            if self.activation_policy is not None:
+                self.activation_policy.observe_kpis(self.latest_kpis, self.infr)
             yield env.timeout(1)
 
     def _reaction_needed(self):
@@ -165,11 +189,17 @@ class Orchestrator:
                 )
         return demand_mat
 
-    def _get_max_acceptable(self, demand_mat: Dict[str, Dict[str, int]]):
+    def _get_max_acceptable(
+        self,
+        demand_mat: Dict[str, Dict[str, int]],
+        status_vec: Optional[Dict[str, int]] = None,
+    ):
         """Rejects not fitting requests
 
         Args:
             demand_mat (Dict[str, Dict[str, int]]): Request matrix
+            status_vec (Optional[Dict[str, int]]): Optional active-server status
+                vector to use when calculating available capacity.
 
         Returns:
             Dict[str, Dict[str, int]]: Request matrix after rejecting requests
@@ -177,14 +207,19 @@ class Orchestrator:
         bss = self.infr.bss.values()
         servcs = self.infr.services.values()
 
-        available = sum(bs.server.max_cap for bs in bss if bs.server is not None)
+        available = sum(
+            bs.server.max_cap
+            for bs in bss
+            if bs.server is not None
+            and (status_vec is None or status_vec.get(bs.name, 0) == 1)
+        )
         required = sum(
             demand_mat[bs.name][serv.name] * serv.workload
             for bs in bss
             for serv in servcs
         )
         if required > available:
-            reject_factor = available / required
+            reject_factor = available / required if available > 0 else 0
             for bs in demand_mat:
                 for serv in demand_mat[bs]:
                     demand_mat[bs][serv] = int(demand_mat[bs][serv] * reject_factor)

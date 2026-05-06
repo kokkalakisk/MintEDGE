@@ -11,6 +11,7 @@ from .energy import (
 from .infrastructure import Infrastructure, EdgeServer, BaseStation, Link
 from .demand_predictor import IdealPredictor
 from .allocation_strategy import AllocationStrategy
+from .rl_activation import QLearningServerActivationPolicy
 from .orchestrator import Orchestrator
 from .simulation import Simulation
 

@@ -4,7 +4,7 @@ import logging
 import math
 from tqdm import tqdm
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 from mintedge import (
     Infrastructure,
     BaseStation,
@@ -31,12 +31,18 @@ class AllocationStrategy:
         """
         self.infr = infr
 
-    def get_allocation(self, demand_matrix: Dict[str, Dict[str, int]]):
+    def get_allocation(
+        self,
+        demand_matrix: Dict[str, Dict[str, int]],
+        server_status: Optional[Dict[str, int]] = None,
+    ):
         """Allocate resources on the infrastructure in a greedy manner
         (closer first)
 
         Args:
             demand_matrix (Dict[str, Dict[str, int]]): Demand matrix
+            server_status (Optional[Dict[str, int]]): Optional on/off decision
+                for each BS. If omitted, all available servers are active.
 
         Returns:
             Dict[str, int]: on/off state of the servers
@@ -54,15 +60,25 @@ class AllocationStrategy:
             lambda: defaultdict(float)
         )  # type: Dict[str, Dict[str, float]]
 
-        server_status = {
-            bs.name: 1 if bs.server is not None else 0 for bs in infr.bss.values()
-        }  # all servers are active
+        if server_status is None:
+            server_status = {
+                bs.name: 1 if bs.server is not None else 0 for bs in infr.bss.values()
+            }  # all servers are active
+        else:
+            server_status = {
+                bs.name: 1
+                if bs.server is not None and server_status.get(bs.name, 0) == 1
+                else 0
+                for bs in infr.bss.values()
+            }
 
         used_cap = {bs: 0 for bs in infr.bss}
 
         # Check if there is enough capacity in the infrastructure
         total_capacity = sum(
-            bs.server.max_cap for bs in infr.bss.values() if bs.server is not None
+            bs.server.max_cap
+            for bs in infr.bss.values()
+            if bs.server is not None and server_status[bs.name] == 1
         )
         total_demand = sum(
             serv.workload * demand_matrix[bs][serv.name]
@@ -259,7 +275,7 @@ class AllocationStrategy:
         cand_servers = []
 
         # Get all paths from bsi to all other base stations.
-        cand_paths = {k: v for k, v in self.infr.paths.items() if k[0] is src.name}
+        cand_paths = {k: v for k, v in self.infr.paths.items() if k[0] == src.name}
         # Get the RAN delay
         t_u = src.get_delay(serv.input_size)
         # Get BSs with a server and within the delay budget
