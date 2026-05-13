@@ -10,8 +10,8 @@ from simpy.core import Environment
 
 import settings
 from mintedge import (
-    AllocationStrategy,
     EnergyMeter,
+    EnergyHeuristic,
     IdealPredictor,
     Infrastructure,
     MobilityManager,
@@ -30,7 +30,7 @@ class Orchestrator:
         "demand_mat",
         "max_lmbda",
         "predictor",
-        "alloc_strategy",
+        "energy_heuristic",
         "kpis",
         "results_path",
         "latest_kpis",
@@ -59,7 +59,7 @@ class Orchestrator:
         self.alloc_mat = self.initialize_allocation_matrix()
         self.demand_mat = self.initialize_demand_matrix()
         self.predictor = IdealPredictor(infr, mob_mngr, env)
-        self.alloc_strategy = AllocationStrategy(infr)
+        self.energy_heuristic = EnergyHeuristic(infr)
         self.activation_policy = (
             QLearningServerActivationPolicy.from_settings()
             if getattr(settings, "USE_RL_SERVER_ACTIVATION", False)
@@ -125,17 +125,17 @@ class Orchestrator:
                     activation_decision.status_vector if activation_decision else None,
                 )
 
-                # New Resource Allocation
+                # New energy-aware resource allocation
                 (
                     status_vec,
                     assig_mat,
                     alloc_mat,
-                ) = self.alloc_strategy.get_allocation(
+                ) = self.energy_heuristic.get_allocation(
                     new_demand_mat,
                     activation_decision.status_vector if activation_decision else None,
                 )
 
-                # Place resources as computed by the allocation strategy
+                # Place resources as computed by the energy heuristic
                 self.allocate(new_demand_mat, status_vec, assig_mat, alloc_mat)
                 # Update current allocation
                 self.status_vec = status_vec
@@ -175,7 +175,7 @@ class Orchestrator:
 
     def _apply_capacity_buffer(self, demand_mat: Dict[str, Dict[str, int]]):
         """Apply a capacity buffer to the demand matrix so that the allocation
-        strategy allocates extra space for future requests.
+        heuristic allocates extra space for future requests.
 
         Args:
             demand_mat (Dict[str, Dict[str, int]]): The request matrix to

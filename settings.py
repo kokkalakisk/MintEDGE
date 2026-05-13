@@ -11,6 +11,11 @@ CAPACITY_BUFFER = 0.2  # [0, 1] share of extra capacity to allocate
 REACTIVE_ALLOCATION = False  # whether to allocate resources reactively when more than a threshold of requests are rejected
 REACTION_THRESHOLD = 0.1  # share of reqs rejected to trigger a new allocation
 
+"""ENERGY-AWARE ALLOCATION HEURISTIC"""
+ENERGY_HEURISTIC_STRATEGY = "odesa"  # options: "odesa", "always_on", "threshold_based"
+ENERGY_HEURISTIC_THRESHOLD = 0.2  # used only when ENERGY_HEURISTIC_STRATEGY = "threshold_based"
+MAX_DELAY_CHECKS = 20
+
 """REINFORCEMENT LEARNING SERVER ACTIVATION"""
 USE_RL_SERVER_ACTIVATION = False
 RL_ACTIVATION_TRAINING = False
